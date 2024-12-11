@@ -1,0 +1,307 @@
+import tkinter as tk
+from tkinter import ttk, messagebox, simpledialog
+from PIL import Image, ImageTk
+from database import Database
+from yandex_sync import YandexDiskSync
+import os
+import sys
+
+class ShoppingListApp:
+
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Shopping List App")
+
+        # Разворачиваем окно на весь экран
+        self.root.attributes("-fullscreen", True)
+
+        # Инициализация базы данных и Yandex.Диска
+        self.db = Database()
+        self.yandex = YandexDiskSync(token='y0_AgAAAABtpZOtAAzlCQAAAAEbA5oCAAAm2w6KgcpFcbtnVTKcLbcIr5lrQw')  # Укажите ваш токен
+
+        # Фон
+        self.screen_width = self.root.winfo_screenwidth()
+        self.screen_height = self.root.winfo_screenheight()
+        self.bg_image = Image.open(resource_path("fon.jpg")).resize((self.screen_width, self.screen_height),
+                                                                    Image.LANCZOS)
+        self.bg_tk = ImageTk.PhotoImage(self.bg_image)
+        self.bg_label = tk.Label(root, image=self.bg_tk)
+        self.bg_label.place(relwidth=1, relheight=1)
+
+        # Заголовок
+        self.title_label = tk.Label(
+            self.bg_label,
+            text="Список продуктов",
+            font=("Arial", 24, "bold"),
+            fg="black",
+            bg=self.bg_label["bg"],
+            bd=0,
+            highlightthickness=0
+        )
+        self.title_label.place(relx=0.4, rely=0.05)
+
+        # Поле ввода товара
+        self.input_entry = tk.Entry(
+            root,
+            font=("Arial", 14),
+            fg="black",
+            bg="white",
+            relief="flat"
+        )
+        self.input_entry.place(relx=0.1, rely=0.15, width=200, height=30)
+
+        # Поле ввода количества
+        self.quantity_entry = tk.Entry(
+            root,
+            font=("Arial", 14),
+            fg="black",
+            bg="white",
+            relief="flat",
+            width=5
+        )
+        self.quantity_entry.place(relx=0.25, rely=0.15, width=60, height=30)
+
+        # Combobox для истории товаров
+        self.combobox = ttk.Combobox(
+            root,
+            font=("Arial", 14),
+            state="readonly"
+        )
+        self.combobox.place(relx=0.1, rely=0.22, width=220, height=30)
+
+        # Обновляем combobox
+        self.update_combobox()
+
+        # Кнопка добавления продукта
+        self.add_button = tk.Button(
+            root,
+            text="+",
+            font=("Arial", 20, "bold"),
+            fg="white",
+            bg="gray",
+            activebackground="lightgray",
+            activeforeground="white",
+            command=self.add_product
+        )
+        self.add_button.place(relx=0.45, rely=0.15, width=40, height=40)
+
+        # Список продуктов
+        self.product_listbox = tk.Listbox(
+            root,
+            font=("Arial", 14),
+            fg="black",
+            bg="#D3D3D3",
+            selectbackground="lightgray",
+            selectforeground="black"
+        )
+        self.product_listbox.place(relx=0.1, rely=0.3, relwidth=0.6, relheight=0.45)
+
+        # Кнопки справа
+        self.create_side_buttons()
+
+        # PNG иконка для очистки корзины
+        self.trash_image = Image.open(resource_path("trash.png")).resize((50, 50), Image.LANCZOS)
+        self.trash_icon = ImageTk.PhotoImage(self.trash_image)
+        self.trash_button = tk.Button(
+            root,
+            image=self.trash_icon,
+            bg="#D3D3D3",
+            relief="flat",
+            command=self.clear_cart
+        )
+        self.trash_button.place(relx=0.1, rely=0.85, width=60, height=60)
+
+        # Фрейм для сохраненных корзин
+        self.basket_frame = tk.LabelFrame(
+            root,
+            text="Сохраненные корзины",
+            font=("Arial", 14),
+            bg="#D3D3D3",
+            fg="black"
+        )
+        self.basket_frame.place(relx=0.1, rely=0.78, relwidth=0.6, relheight=0.06)
+
+        # Обновляем список и кнопки корзин
+        self.update_list()
+        self.update_basket_buttons()
+
+        # Кнопка "Выход" в правом нижнем углу
+        self.exit_button = tk.Button(
+            root,
+            text="Выход",
+            font=("Arial", 12),
+            fg="white",
+            bg="red",
+            activebackground="darkred",
+            activeforeground="white",
+            relief="flat",
+            command=self.on_closing
+        )
+        self.exit_button.place(relx=0.9, rely=0.9, width=100, height=40)
+
+        # Обработчик закрытия
+        self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
+
+    def create_side_buttons(self):
+
+        buttons_info = [
+            ("Добавить из истории", self.add_product_from_history),
+            ("Удалить из истории", self.remove_product_from_history),
+            ("Удалить этот товар", self.remove_product),
+            ("Сохранить корзину", self.save_current_basket),
+            ("Удалить корзину", self.delete_all_baskets),
+            ("Добавить из облака", self.load_from_yandex),
+            ("Отправить в облако", self.save_to_yandex)
+        ]
+
+        for i, (text, cmd) in enumerate(buttons_info):
+            button = tk.Button(
+                self.root,
+                text=text,
+                font=("Arial", 12),
+                fg="black",
+                bg="white",
+                activebackground="lightgray",
+                activeforeground="black",
+                relief="flat",
+                command=cmd
+            )
+            button.place(relx=0.75, rely=0.3 + i * 0.1, width=150, height=40)
+
+
+    def add_product(self):
+        """Добавляет продукт с указанным количеством в список и обновляет интерфейс."""
+        product = self.input_entry.get().strip()
+        quantity = self.quantity_entry.get().strip()
+        if product:
+            try:
+                quantity = int(quantity) if quantity else 1
+            except ValueError:
+                quantity = 1
+            self.db.add_product(product, quantity)
+            self.input_entry.delete(0, tk.END)
+            self.quantity_entry.delete(0, tk.END)
+            self.update_list()
+            self.update_combobox()
+
+    def add_product_from_history(self):
+        """Добавляет продукт из выпадающего списка в основной список."""
+        product = self.combobox.get()
+        if product:
+            self.db.add_product(product)
+            self.update_list()
+
+    def update_list(self):
+        """Обновляет отображение списка покупок с количеством."""
+        self.product_listbox.delete(0, tk.END)
+        for name, quantity in self.db.get_shopping_list():
+            self.product_listbox.insert(tk.END, f"{name} x{quantity}")
+
+    def remove_product(self):
+        """Удаляет выбранный продукт из списка."""
+        try:
+            selected = self.product_listbox.get(self.product_listbox.curselection())
+            product_name = selected.split(' x')[0]
+            self.db.remove_product(product_name)
+            self.update_list()
+        except:
+            pass
+
+    def remove_product_from_history(self):
+        """Удаляет продукт из истории."""
+        product = self.combobox.get()
+        if product:
+            self.db.remove_product_from_history(product)
+            self.update_combobox()
+            messagebox.showinfo("Удаление", f"Продукт '{product}' удален из истории.")
+
+    def update_combobox(self):
+        """Обновляет выпадающий список продуктов из истории."""
+        self.combobox['values'] = self.db.get_product_history()
+
+    def clear_cart(self):
+        """Очищает весь список покупок."""
+        self.db.clear_shopping_list()
+        self.update_list()
+        messagebox.showinfo("Очистка", "Корзина покупок очищена.")
+
+    def save_to_yandex(self):
+        """Сохраняет базу данных на Яндекс.Диск."""
+        try:
+            file_path = "shopping_list.db"  # Локальный путь к базе данных
+            disk_path = "shopping_list.db"  # Имя файла на Яндекс.Диске
+            self.yandex.upload_file(file_path, disk_path)
+            messagebox.showinfo("Синхронизация", "База данных успешно сохранена на Яндекс.Диске.")
+        except Exception as e:
+            messagebox.showerror("Ошибка", f"Не удалось сохранить базу данных: {e}")
+
+    def load_from_yandex(self):
+        """Загружает базу данных с Яндекс.Диска."""
+        try:
+            disk_path = "shopping_list.db"
+            local_path = "shopping_list.db"
+            self.yandex.download_file(disk_path, local_path)
+            messagebox.showinfo("Синхронизация", "База данных успешно загружена с Яндекс.Диска.")
+            self.update_list()
+            self.update_combobox()
+            self.update_basket_buttons()
+        except Exception as e:
+            messagebox.showerror("Ошибка", f"Не удалось загрузить базу данных: {e}")
+
+    def save_current_basket(self):
+        """Сохраняет текущий список покупок как корзину."""
+        basket_name = simpledialog.askstring("Сохранить корзину", "Введите название корзины:")
+        if basket_name:
+            success = self.db.save_basket(basket_name)
+            if success:
+                messagebox.showinfo("Сохранение", f"Корзина '{basket_name}' успешно сохранена.")
+                self.update_basket_buttons()
+            else:
+                messagebox.showerror("Ошибка", "Нельзя сохранить более 3 корзин.")
+
+    def load_basket(self, basket_id):
+        """Загружает сохраненную корзину в список покупок."""
+        self.db.load_basket(basket_id)
+        self.update_list()
+        messagebox.showinfo("Загрузка", "Корзина успешно загружена.")
+
+    def update_basket_buttons(self):
+        """Обновляет кнопки загрузки сохраненных корзин."""
+        for widget in self.basket_frame.winfo_children():
+            widget.destroy()
+        baskets = self.db.get_saved_baskets()
+        for basket_id, basket_name in baskets:
+            btn = tk.Button(
+                self.basket_frame,
+                text=f"Загрузить '{basket_name}'",
+                font=("Arial", 12),
+                bg="white",
+                fg="black",
+                activebackground="lightgray",
+                activeforeground="black",
+                relief="flat",
+                command=lambda id=basket_id: self.load_basket(id)
+            )
+            btn.pack(fill='x', pady=2)
+
+    def delete_all_baskets(self):
+        confirm = messagebox.askyesno("Подтверждение", "Вы действительно хотите удалить все сохраненные корзины?")
+        if confirm:
+            self.db.delete_all_baskets()
+            self.update_basket_buttons()
+            messagebox.showinfo("Удаление", "Все сохраненные корзины удалены.")
+
+    def on_closing(self):
+        self.db.close()
+        self.root.destroy()
+
+
+def resource_path(relative_path):
+    """Получает путь к файлу, совместимый с PyInstaller."""
+    base_path = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(base_path, relative_path)
+
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = ShoppingListApp(root)
+    root.mainloop()
