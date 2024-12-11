@@ -1,0 +1,51 @@
+import requests
+
+class YandexDiskSync:
+    def __init__(self, token):
+        self.base_url = "https://cloud-api.yandex.net/v1/disk"
+        self.headers = {"Authorization": f"OAuth {token}"}
+
+    def upload_file(self, file_path, disk_path):
+        """Загружает файл на Яндекс.Диск."""
+        try:
+            url = f"{self.base_url}/resources/upload"
+            params = {"path": disk_path, "overwrite": "true"}
+            response = requests.get(url, headers=self.headers, params=params)
+            response.raise_for_status()  # Проверяем, есть ли ошибка
+            upload_url = response.json()["href"]
+
+            with open(file_path, "rb") as f:
+                upload_response = requests.put(upload_url, files={"file": f})
+                upload_response.raise_for_status()
+
+            print(f"File '{file_path}' uploaded to '{disk_path}' successfully.")
+        except Exception as e:
+            print(f"Error uploading file: {e}")
+
+    def download_file(self, disk_path, local_path):
+        """Скачивает файл с Яндекс.Диска."""
+        try:
+            url = f"{self.base_url}/resources/download"
+            params = {"path": disk_path}
+            response = requests.get(url, headers=self.headers, params=params)
+            response.raise_for_status()
+            download_url = response.json()["href"]
+
+            download_response = requests.get(download_url)
+            download_response.raise_for_status()
+
+            with open(local_path, "wb") as f:
+                f.write(download_response.content)
+
+            print(f"File '{disk_path}' downloaded to '{local_path}' successfully.")
+        except Exception as e:
+            print(f"Error downloading file: {e}")
+
+    def check_connection(self):
+        """Проверяет подключение к Яндекс.Диску."""
+        try:
+            response = requests.get(self.base_url, headers=self.headers)
+            response.raise_for_status()
+            print("Connected to Yandex.Disk successfully.")
+        except Exception as e:
+            print(f"Error connecting to Yandex.Disk: {e}")
