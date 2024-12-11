@@ -1,1 +1,154 @@
+import sqlite3
+
+class Database:
+    def __init__(self, db_path="shopping_list.db"):
+        self.conn = sqlite3.connect(db_path)
+        self.create_tables()
+
+    def create_tables(self):
+        cursor = self.conn.cursor()
+        # Таблица для списка покупок с количеством
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS shopping_list (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT UNIQUE,
+                quantity INTEGER DEFAULT 1
+            )
+        """)
+        # Таблица для истории продуктов
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS product_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT UNIQUE
+            )
+        """)
+        # Таблица для сохраненных корзин
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS saved_baskets (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT UNIQUE
+            )
+        """)
+        # Таблица для товаров в сохраненных корзинах
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS basket_items (
+                basket_id INTEGER,
+                product_name TEXT,
+                quantity INTEGER,
+                FOREIGN KEY(basket_id) REFERENCES saved_baskets(id)
+            )
+        """)
+        self.conn.commit()
+        # Проверяем и добавляем столбец 'quantity' в таблицу 'shopping_list', если его нет
+        cursor.execute("PRAGMA table_info(shopping_list)")
+        columns = [column[1] for column in cursor.fetchall()]
+        if 'quantity' not in columns:
+            cursor.execute("ALTER TABLE shopping_list ADD COLUMN quantity INTEGER DEFAULT 1")
+            self.conn.commit()
+
+    def add_product(self, name, quantity=1):
+        cursor = self.conn.cursor()
+        # Проверяем, есть ли продукт уже в списке покупок
+        cursor.execute("SELECT quantity FROM shopping_list WHERE name = ?", (name,))
+        result = cursor.fetchone()
+        if result:
+            # Обновляем количество продукта
+            new_quantity = result[0] + quantity
+            cursor.execute("UPDATE shopping_list SET quantity = ? WHERE name = ?", (new_quantity, name))
+        else:
+            # Добавляем новый продукт
+            cursor.execute("INSERT INTO shopping_list (name, quantity) VALUES (?, ?)", (name, quantity))
+        # Добавляем продукт в историю
+        cursor.execute("INSERT OR IGNORE INTO product_history (name) VALUES (?)", (name,))
+        self.conn.commit()
+
+    def get_shopping_list(self):
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT name, quantity FROM shopping_list")
+        return cursor.fetchall()
+
+    def remove_product(self, name):
+        cursor = self.conn.cursor()
+        cursor.execute("DELETE FROM shopping_list WHERE name = ?", (name,))
+        self.conn.commit()
+
+    def get_product_history(self):
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT name FROM product_history")
+        return [row[0] for row in cursor.fetchall()]
+
+    def remove_product_from_history(self, name):
+        cursor = self.conn.cursor()
+        cursor.execute("DELETE FROM product_history WHERE name = ?", (name,))
+        self.conn.commit()
+
+    def clear_shopping_list(self):
+        cursor = self.conn.cursor()
+        cursor.execute("DELETE FROM shopping_list")
+        self.conn.commit()
+
+    def save_basket(self, basket_name):
+        cursor = self.conn.cursor()
+        # Проверяем, сколько корзин уже сохранено
+        cursor.execute("SELECT COUNT(*) FROM saved_baskets")
+        basket_count = cursor.fetchone()[0]
+        if basket_count >= 3:
+            return False  # Превышено максимальное количество корзин
+
+        # Проверяем, существует ли корзина с таким именем
+        cursor.execute("SELECT id FROM saved_baskets WHERE name = ?", (basket_name,))
+        result = cursor.fetchone()
+        if result:
+            basket_id = result[0]
+            # Удаляем старые элементы корзины
+            cursor.execute("DELETE FROM basket_items WHERE basket_id = ?", (basket_id,))
+        else:
+            # Сохраняем новую корзину
+            cursor.execute("INSERT INTO saved_baskets (name) VALUES (?)", (basket_name,))
+            basket_id = cursor.lastrowid
+
+        # Получаем текущий список покупок
+        cursor.execute("SELECT name, quantity FROM shopping_list")
+        items = cursor.fetchall()
+
+        # Проверяем, есть ли товары для сохранения
+        if not items:
+            return False  # Нет товаров для сохранения
+
+        # Сохраняем товары в корзину
+        for name, quantity in items:
+            cursor.execute("INSERT INTO basket_items (basket_id, product_name, quantity) VALUES (?, ?, ?)",
+                           (basket_id, name, quantity))
+        self.conn.commit()
+        return True
+
+    def get_saved_baskets(self):
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT id, name FROM saved_baskets")
+        return cursor.fetchall()
+
+    def load_basket(self, basket_id):
+        cursor = self.conn.cursor()
+        # Очищаем текущий список покупок
+        cursor.execute("DELETE FROM shopping_list")
+        # Загружаем товары из выбранной корзины
+        cursor.execute("SELECT product_name, quantity FROM basket_items WHERE basket_id = ?", (basket_id,))
+        items = cursor.fetchall()
+
+        if not items:
+            return False  # Нет товаров для загрузки
+
+        for name, quantity in items:
+            cursor.execute("INSERT INTO shopping_list (name, quantity) VALUES (?, ?)", (name, quantity))
+        self.conn.commit()
+        return True
+
+    def delete_all_baskets(self):
+        cursor = self.conn.cursor()
+        cursor.execute("DELETE FROM saved_baskets")
+        self.conn.commit()
+
+    def close(self):
+        self.conn.close()
+
 
